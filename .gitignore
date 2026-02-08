@@ -2,7 +2,7 @@
 __pycache__/
 *.pyc
 .venv/
-python/
+
 
 # Runs / artifacts
 runs/
@@ -17,3 +17,4 @@ Thumbs.db
 
 # MuJoCo
 *.mjb
+python/
