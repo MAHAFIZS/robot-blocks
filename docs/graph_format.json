@@ -1,15 +1,40 @@
 {
-  "blocks": [
-    { "id": "ctrl", "type": "CartesianControl" },
-    { "id": "sim", "type": "MuJoCoSim" }
-  ],
-  "connections": [
-    { "from": "ctrl.command", "to": "sim.command" },
-    { "from": "sim.state", "to": "ctrl.state" }
-  ],
+  "version": "graph.v1",
+  "description": "Robot Blocks graph contract (v1). Frontend visual builder exports this file.",
+  "required": ["version", "nodes", "edges", "run_config"],
+  "node": {
+    "required": ["id", "type"],
+    "fields": {
+      "id": "string (unique)",
+      "type": "string (block type key, e.g. 'mujoco_sim', 'cartesian_control')",
+      "label": "string (optional, UI label)",
+      "params": "object (optional, overrides for block.yaml defaults)",
+      "ui": "object (optional, visual builder metadata: position, color, collapsed...)"
+    }
+  },
+  "edge": {
+    "required": ["from", "to"],
+    "fields": {
+      "from": "string in format '<nodeId>.<portName>'",
+      "to": "string in format '<nodeId>.<portName>'",
+      "label": "string (optional)",
+      "ui": "object (optional, visual builder metadata)"
+    }
+  },
   "run_config": {
-    "simulator": "mujoco",
-    "duration_sec": 10,
-    "hz": 20
-  }
+    "fields": {
+      "duration_sec": "int (default 10)",
+      "hz": "int (default 20)",
+      "viewer": "bool (default false)",
+      "overrides": "object (optional). Overrides by nodeId, merged into node.params at execute time."
+    }
+  },
+  "rules": [
+    "Node ids must be unique.",
+    "Edge endpoints must reference existing nodes and ports.",
+    "Ports must exist in the block's declared ports (from block.yaml).",
+    "Types must match using port message types (future: strict type checking).",
+    "Planner derives execution order from data dependencies using edges.",
+    "Executor creates one run folder and stores plan + resolved blocks + run_config + logs + metrics."
+  ]
 }

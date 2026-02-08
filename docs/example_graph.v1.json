@@ -1,0 +1,46 @@
+{
+
+  "version": "graph.v1",
+  "execution_order": ["sim", "ctrl"],
+
+  "nodes": [
+    {
+      "id": "sim",
+      "type": "mujoco_sim",
+      "label": "MuJoCo Sim",
+      "params": {
+        "model_path": "D:\\Work\\robot-blocks\\backend\\.venv\\Lib\\site-packages\\mujoco\\testdata\\MODEL.xml",
+        "dof_index": 0,
+        "dx_scale": 1.0,
+        "apply_mode": "qpos",
+        "substeps_per_tick": 1,
+        "max_abs_x": 1000000000.0
+      },
+      "ui": { "x": 100, "y": 120 }
+    },
+    {
+      "id": "ctrl",
+      "type": "cartesian_control",
+      "label": "Cartesian Control",
+      "params": {
+        "goal_x": 0.5,
+        "step": 0.005
+      },
+      "ui": { "x": 460, "y": 120 }
+    }
+  ],
+  "edges": [
+    { "from": "ctrl.command", "to": "sim.command" },
+    { "from": "sim.state", "to": "ctrl.state" }
+  ],
+  "run_config": {
+    "duration_sec": 10,
+    "hz": 20,
+    "viewer": true,
+    "overrides": {
+      "sim": {
+        "model_path": "D:\\Work\\robot-blocks\\backend\\.venv\\Lib\\site-packages\\mujoco\\testdata\\MODEL.xml"
+      }
+    }
+  }
+}

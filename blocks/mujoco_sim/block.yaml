@@ -1,3 +1,4 @@
+# blocks/mujoco_sim/block.yaml
 block:
   name: MuJoCoSim
   version: "0.2"
@@ -46,5 +47,5 @@ block:
       description: Safety clamp on x
 
   runtime:
-    entrypoint: backend.app.runtime.blocks.mujoco_sim_real:MuJoCoSimReal
+    entrypoint: app.runtime.blocks.mujoco_sim_real:MuJoCoSimReal
     supports_sim: true

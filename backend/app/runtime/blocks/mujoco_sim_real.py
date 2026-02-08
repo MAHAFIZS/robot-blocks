@@ -8,8 +8,7 @@ from typing import Any, Dict, Optional
 import mujoco
 from mujoco import viewer as mj_viewer
 
-from backend.app.runtime.bus import Bus
-
+from app.runtime.bus import Bus
 
 
 @dataclass
@@ -24,7 +23,8 @@ class MuJoCoSimReal:
 
     Params
     ------
-    model_path: str   (required) MJCF/XML path
+    model_path: str   (OPTIONAL with Option A) MJCF/XML path
+      - "" or "mujoco://testdata/model.xml" => uses MuJoCo built-in test model
     dof_index: int    (default 0) which qpos index represents x
     dx_scale: float   (default 1.0) scale incoming dx
     apply_mode: str   (default "qpos") "qpos" | "qvel"
@@ -47,10 +47,20 @@ class MuJoCoSimReal:
     # Utilities
     # --------------------------------------------------------------------- #
 
-    def _require(self, key: str) -> Any:
-        if key not in self.params or self.params[key] in (None, ""):
-            raise ValueError(f"{self.block_id}: missing required param '{key}'")
-        return self.params[key]
+    def _resolve_model_path(self) -> Path:
+        """
+        Option A: if model_path is empty or is mujoco://testdata/model.xml,
+        resolve to MuJoCo's bundled test model in a machine-independent way.
+        """
+        raw = str(self.params.get("model_path", "") or "").strip()
+
+        # ✅ Option A defaults
+        if raw == "" or raw.lower() == "mujoco://testdata/model.xml":
+            mujoco_pkg_dir = Path(mujoco.__file__).resolve().parent
+            return (mujoco_pkg_dir / "testdata" / "model.xml").resolve()
+
+        # Normal paths
+        return Path(raw).expanduser().resolve()
 
     # --------------------------------------------------------------------- #
     # Initialization
@@ -60,7 +70,7 @@ class MuJoCoSimReal:
         if self._loaded:
             return
 
-        model_path = Path(str(self._require("model_path"))).expanduser()
+        model_path = self._resolve_model_path()
         if not model_path.exists():
             raise FileNotFoundError(f"{self.block_id}: model_path not found: {model_path}")
 
@@ -87,7 +97,6 @@ class MuJoCoSimReal:
         Open MuJoCo viewer once (passive mode).
         Safe to call before the first tick: it will load the model/data first.
         """
-        # Ensure model/data exist
         self._ensure_loaded()
 
         if self._viewer is not None:
@@ -97,9 +106,8 @@ class MuJoCoSimReal:
             self._viewer = mj_viewer.launch_passive(self.model, self.data)
             print(f"[{self.block_id}] MuJoCo viewer opened")
         except Exception as e:
-            print(f"[{self.block_id}] Viewer failed to open:", e)
+            print(f"[{self.block_id}] Viewer failed to open: {e}")
             self._viewer = None
-
 
     # --------------------------------------------------------------------- #
     # Runtime Tick
@@ -146,19 +154,18 @@ class MuJoCoSimReal:
             if max_abs_x < 1e9:
                 self.data.qpos[dof_index] = max(
                     -max_abs_x,
-                    min(max_abs_x, self.data.qpos[dof_index])
+                    min(max_abs_x, self.data.qpos[dof_index]),
                 )
 
         # ------------------ Step physics ------------------ #
         substeps = max(1, int(self.params.get("substeps_per_tick", 1)))
-
         for _ in range(substeps):
             mujoco.mj_step(self.model, self.data)
 
         # Sync viewer (if enabled)
         if self._viewer is not None:
             self._viewer.sync()
-            time.sleep(0.0)  # allows GUI to breathe without slowing sim
+            time.sleep(0.0)  # let GUI breathe
 
         # ------------------ Publish state ------------------ #
         x = float(self.data.qpos[dof_index]) if self.model.nq > 0 else 0.0

@@ -1,14 +1,20 @@
 import json
 import time
 from pathlib import Path
+from typing import Dict, Any
 
-from backend.app.runtime.bus import Bus
-from backend.app.runtime.loader import create_block
+from app.runtime.bus import Bus
+from app.runtime.loader import create_block
+
 
 ROOT = Path(__file__).resolve().parents[1]   # backend/
-PROJECT_ROOT = ROOT.parent                   # D:\Work\robot-blocks
+PROJECT_ROOT = ROOT.parent                   # repo root
 RUNS_DIR = PROJECT_ROOT / "runs"
 
+
+# -------------------------
+# Helpers
+# -------------------------
 
 def load_json(p: Path):
     with open(p, "r", encoding="utf-8") as f:
@@ -18,27 +24,20 @@ def load_json(p: Path):
 def latest_run_dir() -> Path:
     runs = sorted([p for p in RUNS_DIR.iterdir() if p.is_dir() and p.name.startswith("run_")])
     if not runs:
-        raise FileNotFoundError(f"No runs found in {RUNS_DIR}. Run planner first.")
+        raise FileNotFoundError("No runs found. Plan a run first.")
     return runs[-1]
 
 
-def deep_merge(base: dict, override: dict) -> dict:
-    """
-    Recursively merge override into base (override wins).
-    Returns a NEW dict.
-    """
-    out = dict(base or {})
-    for k, v in (override or {}).items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict):
-            out[k] = deep_merge(out[k], v)
-        else:
-            out[k] = v
-    return out
+def port_topics(block_id: str, port_names: list[str]) -> dict[str, str]:
+    # Convention: topic == "blockId.portName"
+    return {p: f"{block_id}.{p}" for p in port_names}
 
 
-def main():
-    run_dir = latest_run_dir()
+# -------------------------
+# CORE EXECUTOR (used by CLI + API)
+# -------------------------
 
+def execute_run_dir(run_dir: Path, viewer: bool = False) -> Dict[str, Any]:
     plan = load_json(run_dir / "plan.json")
     resolved = load_json(run_dir / "resolved_blocks.json")
     run_cfg = load_json(run_dir / "run_config.json")
@@ -46,12 +45,6 @@ def main():
     duration = int(run_cfg.get("duration_sec", 10))
     hz = int(run_cfg.get("hz", 20))
     ticks = duration * hz
-    tick_period = 1.0 / max(hz, 1)
-
-    viewer_enabled = bool(run_cfg.get("viewer", False))
-
-    # NEW: run-config overrides by block_id
-    overrides_by_block = run_cfg.get("overrides", {}) or {}
 
     bus = Bus()
 
@@ -59,117 +52,72 @@ def main():
     order = plan.get("execution_order", [b["id"] for b in resolved])
     connections = plan.get("connections", [])
 
-    def port_topics(block_id: str, port_names: list[str]) -> dict[str, str]:
-        return {p: f"{block_id}.{p}" for p in port_names}
-
-    # Instantiate blocks dynamically
+    # -------------------------
+    # Instantiate blocks
+    # -------------------------
     blocks = {}
+
     for bid in order:
         spec = resolved_by_id[bid]
-        entrypoint = (spec.get("runtime") or {}).get("entrypoint", "")
+
+        runtime = spec.get("runtime") or {}
+        entrypoint = runtime.get("entrypoint")
         if not entrypoint:
             raise ValueError(f"Missing runtime.entrypoint for block {bid}")
 
-        in_ports = (spec.get("ports") or {}).get("inputs", [])
-        out_ports = (spec.get("ports") or {}).get("outputs", [])
-
-        # NEW: apply overrides
-        base_params = spec.get("params", {}) or {}
-        block_override = overrides_by_block.get(bid, {}) or {}
-        merged_params = deep_merge(base_params, block_override)
+        ports = spec.get("ports") or {}
+        in_ports = ports.get("inputs", [])
+        out_ports = ports.get("outputs", [])
 
         blk = create_block(
             block_id=bid,
-            params=merged_params,
+            params=spec.get("params", {}),
             entrypoint=entrypoint,
             inputs=port_topics(bid, in_ports),
             outputs=port_topics(bid, out_ports),
         )
+
+        # Optional viewer hook for sim blocks
+        if viewer and hasattr(blk, "maybe_open_viewer"):
+            blk.maybe_open_viewer()
+
         blocks[bid] = blk
 
-    # Open viewer once (if enabled)
-    if viewer_enabled and "sim" in blocks:
-        sim_blk = blocks["sim"]
-        if hasattr(sim_blk, "maybe_open_viewer"):
-            try:
-                sim_blk.maybe_open_viewer()
-            except Exception as e:
-                print("[executor] Viewer requested but failed:", e)
-
+    # -------------------------
+    # Routing
+    # -------------------------
     def route_all(tick: int):
         for c in connections:
-            src = c["from"]
-            dst = c["to"]
-            msg = bus.read(src)
+            msg = bus.read(c["from"])
             if msg:
-                bus.publish(dst, msg.type, msg.data, tick=tick)
+                bus.publish(c["to"], msg.type, msg.data, tick=tick)
 
-    # Logs
-    log_dir = run_dir / "logs"
-    log_dir.mkdir(exist_ok=True)
-
-    state_log_path = log_dir / "state.jsonl"
-    cmd_log_path = log_dir / "command.jsonl"
-
-    state_log = open(state_log_path, "w", encoding="utf-8")
-    cmd_log = open(cmd_log_path, "w", encoding="utf-8")
-
-    # Metrics demo: track sim.state.x
+    # -------------------------
+    # Metrics
+    # -------------------------
     last_x = 0.0
     max_x = -1e9
 
-    print(f"▶ Running {ticks} ticks @ {hz} Hz (viewer={viewer_enabled})")
+    # -------------------------
+    # Main loop
+    # -------------------------
+    print(f"▶ Running {ticks} ticks @ {hz} Hz (viewer={viewer})")
 
-    try:
-        for t in range(ticks):
-            tick_start = time.perf_counter()
+    for t in range(ticks):
+        route_all(t)
 
+        for bid in order:
+            blocks[bid].tick(bus, t)
             route_all(t)
 
-            for bid in order:
-                blocks[bid].tick(bus, t)
-                route_all(t)
+        st = bus.read("sim.state")
+        if st and st.type == "robot_state":
+            last_x = float(st.data.get("x", last_x))
+            max_x = max(max_x, last_x)
 
-            st = bus.read("sim.state")
-            cmd = bus.read("ctrl.command")
-
-            # Logging
-            if st:
-                state_log.write(json.dumps({
-                    "tick": t,
-                    "msg_tick": st.tick,
-                    "type": st.type,
-                    "data": st.data,
-                }) + "\n")
-
-            if cmd:
-                cmd_log.write(json.dumps({
-                    "tick": t,
-                    "msg_tick": cmd.tick,
-                    "type": cmd.type,
-                    "data": cmd.data,
-                }) + "\n")
-
-            if (t % 20) == 0:
-                state_log.flush()
-                cmd_log.flush()
-
-            # Metrics
-            if st and st.type == "robot_state":
-                last_x = float(st.data.get("x", last_x))
-                max_x = max(max_x, last_x)
-
-            # Real-time pacing
-            elapsed = time.perf_counter() - tick_start
-            remaining = tick_period - elapsed
-            if remaining > 0:
-                time.sleep(remaining)
-
-    finally:
-        state_log.flush()
-        cmd_log.flush()
-        state_log.close()
-        cmd_log.close()
+        # realtime pacing if viewer is on
+        if viewer:
+            time.sleep(1.0 / hz)
 
     metrics = {
         "duration_sec": duration,
@@ -179,12 +127,6 @@ def main():
         "max_x": max_x,
         "goal_reached": last_x >= 0.5,
         "run_dir": str(run_dir),
-        "viewer": viewer_enabled,
-        "overrides": overrides_by_block,
-        "logs": {
-            "state_jsonl": str(state_log_path),
-            "command_jsonl": str(cmd_log_path),
-        },
     }
 
     out_path = run_dir / "metrics.json"
@@ -192,18 +134,16 @@ def main():
         json.dump(metrics, f, indent=2)
 
     print(f"✅ Run finished. Metrics written to: {out_path}")
-    print(f"📝 Logs: {state_log_path} | {cmd_log_path}")
+    return metrics
 
-    # Keep viewer alive until user closes window or Ctrl+C
-    if viewer_enabled and "sim" in blocks:
-        sim_blk = blocks["sim"]
-        if hasattr(sim_blk, "_viewer") and getattr(sim_blk, "_viewer") is not None:
-            print("🟦 MuJoCo viewer open. Close the window or press Ctrl+C to exit.")
-            try:
-                while True:
-                    time.sleep(0.2)
-            except KeyboardInterrupt:
-                print("🟨 Execution interrupted by user.")
+
+# -------------------------
+# CLI entrypoint
+# -------------------------
+
+def main():
+    run_dir = latest_run_dir()
+    execute_run_dir(run_dir, viewer=False)
 
 
 if __name__ == "__main__":

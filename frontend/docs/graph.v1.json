@@ -1,0 +1,54 @@
+{
+  "version": "graph.v1",
+  "execution_order": ["mujoco_sim_45f2f3", "cartesian_control_a71a9b"],
+  "nodes": [
+    {
+      "id": "mujoco_sim_45f2f3",
+      "type": "mujoco_sim",
+      "label": "MuJoCo Sim",
+      "params": {
+        "model_path": "D:/Work/robot-blocks/backend/.venv/Lib/site-packages/mujoco/testdata/model.xml",
+        "dof_index": 0,
+        "dx_scale": 1,
+        "apply_mode": "qpos",
+        "substeps_per_tick": 1,
+        "max_abs_x": 1000000000
+      },
+      "ui": {
+        "x": 134,
+        "y": 123
+      }
+    },
+    {
+      "id": "cartesian_control_a71a9b",
+      "type": "cartesian_control",
+      "label": "Cartesian Control",
+      "params": {
+        "goal_x": 0.5,
+        "step": 0.005
+      },
+      "ui": {
+        "x": 1095,
+        "y": 130
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "mujoco_sim_45f2f3.state",
+      "to": "cartesian_control_a71a9b.state",
+      "msg_type": "robot_state"
+    },
+    {
+      "from": "cartesian_control_a71a9b.command",
+      "to": "mujoco_sim_45f2f3.command",
+      "msg_type": "cartesian_cmd"
+    }
+  ],
+  "run_config": {
+    "duration_sec": 10,
+    "hz": 20,
+    "viewer": true,
+    "overrides": {}
+  }
+}
