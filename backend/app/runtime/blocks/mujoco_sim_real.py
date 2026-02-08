@@ -8,7 +8,8 @@ from typing import Any, Dict, Optional
 import mujoco
 from mujoco import viewer as mj_viewer
 
-from app.runtime.bus import Bus
+from backend.app.runtime.bus import Bus
+
 
 
 @dataclass

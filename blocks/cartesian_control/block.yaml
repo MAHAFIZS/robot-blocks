@@ -20,5 +20,7 @@ block:
       description: Cartesian step per tick
 
   runtime:
-    entrypoint: app.runtime.blocks.cartesian_control:CartesianControlMock
+    
+    entrypoint: backend.app.runtime.blocks.cartesian_control:CartesianControlMock
+
     supports_sim: true

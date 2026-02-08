@@ -2,8 +2,8 @@ import json
 import time
 from pathlib import Path
 
-from app.runtime.bus import Bus
-from app.runtime.loader import create_block
+from backend.app.runtime.bus import Bus
+from backend.app.runtime.loader import create_block
 
 ROOT = Path(__file__).resolve().parents[1]   # backend/
 PROJECT_ROOT = ROOT.parent                   # D:\Work\robot-blocks
@@ -16,12 +16,24 @@ def load_json(p: Path):
 
 
 def latest_run_dir() -> Path:
-    runs = sorted(
-        [p for p in RUNS_DIR.iterdir() if p.is_dir() and p.name.startswith("run_")]
-    )
+    runs = sorted([p for p in RUNS_DIR.iterdir() if p.is_dir() and p.name.startswith("run_")])
     if not runs:
         raise FileNotFoundError(f"No runs found in {RUNS_DIR}. Run planner first.")
     return runs[-1]
+
+
+def deep_merge(base: dict, override: dict) -> dict:
+    """
+    Recursively merge override into base (override wins).
+    Returns a NEW dict.
+    """
+    out = dict(base or {})
+    for k, v in (override or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
 
 
 def main():
@@ -38,6 +50,9 @@ def main():
 
     viewer_enabled = bool(run_cfg.get("viewer", False))
 
+    # NEW: run-config overrides by block_id
+    overrides_by_block = run_cfg.get("overrides", {}) or {}
+
     bus = Bus()
 
     resolved_by_id = {b["id"]: b for b in resolved}
@@ -45,10 +60,9 @@ def main():
     connections = plan.get("connections", [])
 
     def port_topics(block_id: str, port_names: list[str]) -> dict[str, str]:
-        # Convention: topic == "blockId.portName"
         return {p: f"{block_id}.{p}" for p in port_names}
 
-    # -------------------- Instantiate blocks -------------------- #
+    # Instantiate blocks dynamically
     blocks = {}
     for bid in order:
         spec = resolved_by_id[bid]
@@ -59,16 +73,21 @@ def main():
         in_ports = (spec.get("ports") or {}).get("inputs", [])
         out_ports = (spec.get("ports") or {}).get("outputs", [])
 
+        # NEW: apply overrides
+        base_params = spec.get("params", {}) or {}
+        block_override = overrides_by_block.get(bid, {}) or {}
+        merged_params = deep_merge(base_params, block_override)
+
         blk = create_block(
             block_id=bid,
-            params=spec.get("params", {}),
+            params=merged_params,
             entrypoint=entrypoint,
             inputs=port_topics(bid, in_ports),
             outputs=port_topics(bid, out_ports),
         )
         blocks[bid] = blk
 
-    # -------------------- Viewer -------------------- #
+    # Open viewer once (if enabled)
     if viewer_enabled and "sim" in blocks:
         sim_blk = blocks["sim"]
         if hasattr(sim_blk, "maybe_open_viewer"):
@@ -77,7 +96,6 @@ def main():
             except Exception as e:
                 print("[executor] Viewer requested but failed:", e)
 
-    # -------------------- Routing -------------------- #
     def route_all(tick: int):
         for c in connections:
             src = c["from"]
@@ -86,7 +104,7 @@ def main():
             if msg:
                 bus.publish(dst, msg.type, msg.data, tick=tick)
 
-    # -------------------- Logging -------------------- #
+    # Logs
     log_dir = run_dir / "logs"
     log_dir.mkdir(exist_ok=True)
 
@@ -96,7 +114,7 @@ def main():
     state_log = open(state_log_path, "w", encoding="utf-8")
     cmd_log = open(cmd_log_path, "w", encoding="utf-8")
 
-    # -------------------- Metrics -------------------- #
+    # Metrics demo: track sim.state.x
     last_x = 0.0
     max_x = -1e9
 
@@ -106,54 +124,42 @@ def main():
         for t in range(ticks):
             tick_start = time.perf_counter()
 
-            # Route so blocks see latest inputs
             route_all(t)
 
             for bid in order:
                 blocks[bid].tick(bus, t)
                 route_all(t)
 
-            # ---- Read messages ----
             st = bus.read("sim.state")
             cmd = bus.read("ctrl.command")
 
-            # ---- Logging ----
+            # Logging
             if st:
-                state_log.write(
-                    json.dumps(
-                        {
-                            "tick": t,
-                            "msg_tick": st.tick,
-                            "type": st.type,
-                            "data": st.data,
-                        }
-                    )
-                    + "\n"
-                )
+                state_log.write(json.dumps({
+                    "tick": t,
+                    "msg_tick": st.tick,
+                    "type": st.type,
+                    "data": st.data,
+                }) + "\n")
 
             if cmd:
-                cmd_log.write(
-                    json.dumps(
-                        {
-                            "tick": t,
-                            "msg_tick": cmd.tick,
-                            "type": cmd.type,
-                            "data": cmd.data,
-                        }
-                    )
-                    + "\n"
-                )
+                cmd_log.write(json.dumps({
+                    "tick": t,
+                    "msg_tick": cmd.tick,
+                    "type": cmd.type,
+                    "data": cmd.data,
+                }) + "\n")
 
             if (t % 20) == 0:
                 state_log.flush()
                 cmd_log.flush()
 
-            # ---- Metrics ----
+            # Metrics
             if st and st.type == "robot_state":
                 last_x = float(st.data.get("x", last_x))
                 max_x = max(max_x, last_x)
 
-            # ---- Real-time pacing ----
+            # Real-time pacing
             elapsed = time.perf_counter() - tick_start
             remaining = tick_period - elapsed
             if remaining > 0:
@@ -174,6 +180,7 @@ def main():
         "goal_reached": last_x >= 0.5,
         "run_dir": str(run_dir),
         "viewer": viewer_enabled,
+        "overrides": overrides_by_block,
         "logs": {
             "state_jsonl": str(state_log_path),
             "command_jsonl": str(cmd_log_path),
@@ -187,10 +194,10 @@ def main():
     print(f"✅ Run finished. Metrics written to: {out_path}")
     print(f"📝 Logs: {state_log_path} | {cmd_log_path}")
 
-    # -------------------- Keep viewer alive -------------------- #
+    # Keep viewer alive until user closes window or Ctrl+C
     if viewer_enabled and "sim" in blocks:
         sim_blk = blocks["sim"]
-        if hasattr(sim_blk, "_viewer") and sim_blk._viewer is not None:
+        if hasattr(sim_blk, "_viewer") and getattr(sim_blk, "_viewer") is not None:
             print("🟦 MuJoCo viewer open. Close the window or press Ctrl+C to exit.")
             try:
                 while True:

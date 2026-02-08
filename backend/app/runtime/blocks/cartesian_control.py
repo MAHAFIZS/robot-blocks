@@ -2,7 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict
 
-from app.runtime.bus import Bus
+from backend.app.runtime.bus import Bus
+
 
 
 @dataclass

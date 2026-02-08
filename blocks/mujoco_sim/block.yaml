@@ -46,5 +46,5 @@ block:
       description: Safety clamp on x
 
   runtime:
-    entrypoint: app.runtime.blocks.mujoco_sim_real:MuJoCoSimReal
+    entrypoint: backend.app.runtime.blocks.mujoco_sim_real:MuJoCoSimReal
     supports_sim: true
