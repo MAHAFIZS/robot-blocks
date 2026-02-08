@@ -1,0 +1,24 @@
+block:
+  name: CartesianControl
+  version: "0.1"
+  description: Simple Cartesian controller producing target commands
+  category: control
+
+  inputs:
+    - name: state
+      type: robot_state
+      required: true
+
+  outputs:
+    - name: command
+      type: cartesian_cmd
+
+  params:
+    - name: step_size
+      type: float
+      default: 0.01
+      description: Cartesian step per tick
+
+  runtime:
+    entrypoint: app.runtime.blocks.cartesian_control:CartesianControlMock
+    supports_sim: true

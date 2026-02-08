@@ -1,0 +1,15 @@
+{
+  "blocks": [
+    { "id": "ctrl", "type": "CartesianControl" },
+    { "id": "sim", "type": "MuJoCoSim" }
+  ],
+  "connections": [
+    { "from": "ctrl.command", "to": "sim.command" },
+    { "from": "sim.state", "to": "ctrl.state" }
+  ],
+  "run_config": {
+    "simulator": "mujoco",
+    "duration_sec": 10,
+    "hz": 20
+  }
+}

@@ -1,0 +1,50 @@
+block:
+  name: MuJoCoSim
+  version: "0.2"
+  description: MuJoCo simulator block (real)
+
+  category: sim
+
+  inputs:
+    - name: command
+      type: cartesian_cmd
+      required: true
+
+  outputs:
+    - name: state
+      type: robot_state
+
+  params:
+    - name: model_path
+      type: string
+      default: ""
+      description: Path to MJCF/XML model (required)
+
+    - name: dof_index
+      type: int
+      default: 0
+      description: Which qpos index to treat as x
+
+    - name: dx_scale
+      type: float
+      default: 1.0
+      description: Scale incoming dx command
+
+    - name: apply_mode
+      type: string
+      default: qpos
+      description: qpos or qvel
+
+    - name: substeps_per_tick
+      type: int
+      default: 1
+      description: How many mj_step calls per platform tick
+
+    - name: max_abs_x
+      type: float
+      default: 1000000000.0
+      description: Safety clamp on x
+
+  runtime:
+    entrypoint: app.runtime.blocks.mujoco_sim_real:MuJoCoSimReal
+    supports_sim: true
