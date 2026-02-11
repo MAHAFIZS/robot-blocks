@@ -1,0 +1,16 @@
+label: Logger
+category: debug
+
+runtime:
+  entrypoint: app.runtime.blocks.logger:Logger
+
+ports:
+  inputs:
+    - name: state
+      type: robot_state
+  outputs: []
+
+params:
+  defaults:
+    every_n: 1
+    prefix: "[STATE]"

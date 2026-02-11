@@ -1,34 +1,44 @@
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Dict, Any
-from .bus import Bus
+
+import json
+from typing import Any, Dict
 
 
-@dataclass
-class MuJoCoSimMock:
-    block_id: str
-    params: Dict[str, Any]
-    in_command_topic: str
-    out_state_topic: str
+def ensure_obj(x: Any) -> Any:
+    if isinstance(x, str):
+        s = x.strip()
+        if (s.startswith("{") and s.endswith("}")) or (s.startswith("[") and s.endswith("]")):
+            try:
+                return json.loads(s)
+            except Exception:
+                return x
+    return x
 
-    # internal state
-    x: float = 0.0
 
-    def tick(self, bus: Bus, t: int) -> None:
-        # Read latest command (if any)
-        cmd = bus.read(self.in_command_topic)
-        if cmd and cmd.type == "cartesian_cmd":
-            dx = float(cmd.data.get("dx", 0.0))
-        else:
-            dx = 0.0
+class MuJoCoSim:
+    def __init__(self, block_id: str, params: Dict[str, Any], inputs: Dict[str, str], outputs: Dict[str, str]):
+        self.block_id = block_id
+        self.params = params or {}
+        self.inputs = inputs or {}
+        self.outputs = outputs or {}
+        self.x = 0.0
 
-        # "simulate": x follows command
+    def tick(self, bus, t: int) -> None:
+        cmd_topic = self.inputs.get("command")
+        cmd = bus.read(cmd_topic) if cmd_topic else None
+
+        dx = 0.0
+        if cmd and getattr(cmd, "type", None) == "cartesian_cmd":
+            data = ensure_obj(getattr(cmd, "data", None))
+            if isinstance(data, dict):
+                try:
+                    dx = float(data.get("dx", 0.0))
+                except Exception:
+                    dx = 0.0
+
+        dx *= float(self.params.get("dx_scale", 1.0))
         self.x += dx
 
-        # Publish robot_state
-        bus.publish(
-            self.out_state_topic,
-            "robot_state",
-            {"x": self.x, "t": t},
-            tick=t,
-        )
+        out_topic = self.outputs.get("state")
+        if out_topic:
+            bus.publish(out_topic, "robot_state", {"x": self.x, "t": t}, tick=t)

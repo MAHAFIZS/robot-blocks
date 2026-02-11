@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 .venv/
 
+# Node
+node_modules/
+dist/
 
 # Runs / artifacts
 runs/
@@ -17,4 +20,10 @@ Thumbs.db
 
 # MuJoCo
 *.mjb
-python/
+
+# Accidental duplicates
+backend/old backend/
+blocks/app/
+blocks/backend/
+blocks/blocks/
+/app/

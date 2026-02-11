@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -9,6 +10,22 @@ import mujoco
 from mujoco import viewer as mj_viewer
 
 from app.runtime.bus import Bus
+
+
+def _as_obj(x: Any) -> Any:
+    """
+    Normalize message payloads:
+    - If payload is a JSON string, decode it into dict/list.
+    - Otherwise return as-is.
+    """
+    if isinstance(x, str):
+        s = x.strip()
+        if (s.startswith("{") and s.endswith("}")) or (s.startswith("[") and s.endswith("]")):
+            try:
+                return json.loads(s)
+            except Exception:
+                return x
+    return x
 
 
 @dataclass
@@ -126,9 +143,14 @@ class MuJoCoSimReal:
         dx = 0.0
 
         if cmd and cmd.type == "cartesian_cmd":
-            try:
-                dx = float(cmd.data.get("dx", 0.0))
-            except Exception:
+            payload = _as_obj(cmd.data)
+            if isinstance(payload, dict):
+                try:
+                    dx = float(payload.get("dx", 0.0))
+                except Exception:
+                    dx = 0.0
+            else:
+                # payload may be a plain string/number; ignore safely
                 dx = 0.0
 
         dx *= float(self.params.get("dx_scale", 1.0))

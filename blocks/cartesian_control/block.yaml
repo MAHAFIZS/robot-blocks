@@ -21,6 +21,6 @@ block:
 
   runtime:
     
-    entrypoint: app.runtime.blocks.cartesian_control:CartesianControlMock
+    entrypoint: app.runtime.blocks.cartesian_control:CartesianControl
 
     supports_sim: true

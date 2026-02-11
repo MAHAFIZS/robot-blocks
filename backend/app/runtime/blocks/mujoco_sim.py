@@ -1,32 +1,34 @@
-from __future__ import annotations
-from dataclasses import dataclass
-from typing import Any, Dict
+import json
+from typing import Any
 
-from app.runtime.bus import Bus
+def _as_obj(x: Any) -> Any:
+    if isinstance(x, str):
+        s = x.strip()
+        if (s.startswith("{") and s.endswith("}")) or (s.startswith("[") and s.endswith("]")):
+            try:
+                return json.loads(s)
+            except Exception:
+                return x
+    return x
 
+class MuJoCoSim:
+    def __init__(self, block_id, params, inputs, outputs):
+        self.block_id = block_id
+        self.params = params
+        self.inputs = inputs
+        self.outputs = outputs
+        self.x = 0.0
 
-@dataclass
-class MuJoCoSimMock:
-    block_id: str
-    params: Dict[str, Any]
-    inputs: Dict[str, str]
-    outputs: Dict[str, str]
+    def tick(self, bus, t: int):
+        cmd = bus.read(self.inputs["command"])
 
-    x: float = 0.0
+        if cmd and cmd.type == "cartesian_cmd":
+            data = _as_obj(cmd.data)
+            dx = float(data.get("dx", 0.0)) if isinstance(data, dict) else 0.0
+        else:
+            dx = 0.0
 
-    def tick(self, bus: Bus, t: int) -> None:
-        cmd_topic = self.inputs.get("command")
-        state_topic = self.outputs.get("state")
+        dx_scale = float(self.params.get("dx_scale", 1.0))
+        self.x += dx * dx_scale
 
-        cmd = bus.read(cmd_topic) if cmd_topic else None
-        dx = float(cmd.data.get("dx", 0.0)) if (cmd and cmd.type == "cartesian_cmd") else 0.0
-
-        self.x += dx
-
-        if state_topic:
-            bus.publish(
-                state_topic,
-                "robot_state",
-                {"x": self.x, "t": t},
-                tick=t,
-            )
+        bus.publish(self.outputs["state"], "robot_state", {"x": self.x}, tick=t)

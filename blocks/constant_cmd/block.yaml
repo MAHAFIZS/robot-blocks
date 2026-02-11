@@ -1,0 +1,36 @@
+block:
+  name: ConstantCmd
+  version: "0.1"
+  description: Emits a constant cartesian command every tick.
+
+  category: input
+
+  inputs: []
+
+  outputs:
+    - name: command
+      type: cartesian_cmd
+
+  params:
+    - name: dx
+      type: float
+      default: 0.0
+    - name: dy
+      type: float
+      default: 0.0
+    - name: dz
+      type: float
+      default: 0.0
+    - name: drx
+      type: float
+      default: 0.0
+    - name: dry
+      type: float
+      default: 0.0
+    - name: drz
+      type: float
+      default: 0.0
+
+  runtime:
+    entrypoint: app.runtime.blocks.constant_cmd:ConstantCmd
+    supports_sim: true
